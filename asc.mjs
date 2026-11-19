@@ -267,6 +267,20 @@ async function metadata(app) {
 async function init(app) {
   mkdirSync(join(app.asDir, 'metadata'), { recursive: true });
   const w = (f, o) => { const p = join(app.asDir, f); if (existsSync(p)) return log(`kept ${f}`); writeFileSync(p, typeof o === 'string' ? o : JSON.stringify(o, null, 2) + '\n'); log(`wrote ${f}`); };
+  // Prefill TestFlight groups and testers from the live record, when the app exists.
+  try {
+    const a0 = await findApp(app);
+    const gs = await list(`/v1/apps/${a0.id}/betaGroups`);
+    if (gs.length) {
+      const groups = [];
+      for (const g of gs) {
+        const ts = await list(`/v1/betaGroups/${g.id}/betaTesters`);
+        const at = g.attributes;
+        groups.push({ name: at.name, internal: !!at.isInternalGroup, ...(at.isInternalGroup ? { allBuilds: !!at.hasAccessToAllBuilds } : { publicLink: !!at.publicLinkEnabled }), testers: ts.map((t) => ({ email: t.attributes.email, firstName: t.attributes.firstName || '', lastName: t.attributes.lastName || '' })) });
+      }
+      w('testflight.json', { locale: 'en-US', submitForBetaReview: true, groups });
+    }
+  } catch { /* app not found: fall through to the template */ }
   w('testflight.json', { locale: 'en-US', submitForBetaReview: true, groups: [{ name: 'Internal', internal: true, allBuilds: true, testers: [{ email: 'TODO', firstName: '', lastName: '' }] }] });
   w('release-notes.txt', 'TODO (delete this line to generate notes from git commits since the last apple-* tag)\n');
   w('app.json', { primaryCategory: 'TODO (e.g. FINANCE, FOOD_AND_DRINK)', secondaryCategory: '', copyright: 'TODO (e.g. 2026 Ryan Canfield)', review: { contactFirstName: 'TODO', contactLastName: '', contactPhone: '', contactEmail: 'TODO', demoAccountRequired: false, notes: '' } });
