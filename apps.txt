@@ -1,0 +1,3 @@
+# One Expo app dir per line (the folder with app.json). Add future projects here.
+~/Claude/Projects/Financial Advisor/app
+~/Claude/Projects/Personal Chef/app

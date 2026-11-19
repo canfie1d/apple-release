@@ -1,0 +1,45 @@
+# Copy to <repo>/.github/workflows/apple-release.yml and set app-dir.
+# Manual run: Actions > Apple release > Run workflow.
+# Scheduled run: Mondays 08:00 Pacific, and only when the app folder changed since the last apple-* tag.
+name: Apple release
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms: { type: choice, options: [all, ios, mac], default: all }
+      upload:    { type: boolean, default: true }
+      metadata:  { type: boolean, default: false, description: Also push store metadata and attach the build }
+  schedule:
+    - cron: "0 16 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.g.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, fetch-tags: true }
+      - id: g
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          last=$(git tag --list 'apple-*' --sort=-creatordate | head -n 1)
+          if [ -z "$last" ] || [ -n "$(git diff --name-only "$last" HEAD -- __APP_DIR__)" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "No changes in __APP_DIR__ since $last"
+          fi
+
+  release:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    uses: canfie1d/apple-release/.github/workflows/release.yml@main
+    with:
+      app-dir: __APP_DIR__
+      platforms: ${{ github.event.inputs.platforms || 'all' }}
+      upload: ${{ github.event_name == 'schedule' || github.event.inputs.upload == 'true' }}
+      metadata: ${{ github.event.inputs.metadata == 'true' }}
+    secrets: inherit

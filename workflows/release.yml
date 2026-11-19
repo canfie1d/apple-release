@@ -1,0 +1,77 @@
+# Reusable workflow: archive an Expo app on a macOS runner and upload it to App Store Connect, then set TestFlight
+# groups and release notes. Call it from an app repo (see templates/apple-release.caller.yml).
+# Signing is Xcode automatic signing with the App Store Connect API key (cloud-managed certificates), so no
+# certificate or provisioning profile is stored in GitHub. The API key needs the Admin role for that.
+name: Apple release (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      app-dir:    { type: string,  required: true }
+      platforms:  { type: string,  default: all }      # all | ios | mac
+      upload:     { type: boolean, default: true }
+      metadata:   { type: boolean, default: false }
+      prebuild:   { type: boolean, default: false }
+      xcode:      { type: string,  default: latest-stable }
+      tool-repo:  { type: string,  default: canfie1d/apple-release }
+      tool-ref:   { type: string,  default: main }
+    secrets:
+      ASC_KEY_ID:     { required: true }
+      ASC_ISSUER_ID:  { required: true }
+      ASC_KEY_P8:     { required: true }   # the .p8 file contents, base64 encoded
+      TOOL_REPO_TOKEN: { required: false } # only when the tool repo is private
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 150
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, fetch-tags: true }
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.tool-repo }}
+          ref: ${{ inputs.tool-ref }}
+          path: .apple-release
+          token: ${{ secrets.TOOL_REPO_TOKEN || github.token }}
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with: { xcode-version: "${{ inputs.xcode }}" }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+
+      - name: API key
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          echo "${{ secrets.ASC_KEY_P8 }}" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey.p8"
+
+      - name: Archive and upload
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          export ASC_KEY_PATH="$RUNNER_TEMP/asc/AuthKey.p8"
+          args=("${{ inputs.app-dir }}")
+          case "${{ inputs.platforms }}" in ios) args+=(--ios-only);; mac) args+=(--mac-only);; esac
+          [ "${{ inputs.upload }}" = "true" ]   || args+=(--no-upload)
+          [ "${{ inputs.metadata }}" = "true" ] && args+=(--metadata)
+          [ "${{ inputs.prebuild }}" = "true" ] && args+=(--prebuild)
+          git config user.name "github-actions"; git config user.email "actions@github.com"
+          .apple-release/apple-release.sh "${args[@]}"
+
+      - name: Push the release tag
+        if: inputs.upload
+        run: git push origin --tags
+
+      - name: Keep logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-release-logs
+          path: ${{ inputs.app-dir }}/build/*.log
+          retention-days: 14
