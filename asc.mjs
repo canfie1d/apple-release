@@ -144,6 +144,7 @@ async function ensureGroup(appId, g, groups) {
 async function addTesters(group, testers) {
   for (const t of testers || []) {
     const email = typeof t === 'string' ? t : t.email;
+    if (isTodo(email)) { warn('skipping tester with placeholder email'); continue; }
     try {
       const ex = await api('GET', `/v1/betaTesters?filter[email]=${encodeURIComponent(email)}`);
       if (ex.data?.length) {
